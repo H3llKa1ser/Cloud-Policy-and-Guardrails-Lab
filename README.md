@@ -1,6 +1,6 @@
 # Cloud Policy & Guardrails Lab
 
-[![guardrails](https://github.com/<your-user>/tf-guardrails-lab/actions/workflows/guardrails.yml/badge.svg)](https://github.com/<your-user>/tf-guardrails-lab/actions/workflows/guardrails.yml)
+[![guardrails](https://github.com/H3llKa1ser/Cloud-Policy-and-Guardrails-Lab/actions/workflows/guardrails.yml/badge.svg)](https://github.com/H3llKa1ser/Cloud-Policy-and-Guardrails-Lab/actions/workflows/guardrails.yml)
 
 Policy-as-code guardrails for AWS infrastructure, built with **Terraform**, **Open Policy Agent (Rego)** and **Conftest**, and enforced in CI on every pull request.
 
