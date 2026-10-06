@@ -1,0 +1,17 @@
+# Static scanning complements the plan-time OPA guardrails:
+#   - Checkov reads HCL, so it sees values the plan only knows after apply
+#     (e.g. IAM policies built from module outputs).
+#   - OPA reads the plan, so it sees the fully-resolved result of variables,
+#     modules, count/for_each and provider default_tags.
+# Accepted risks are recorded as inline `#checkov:skip=ID:reason` comments
+# next to the resource, so every exception is visible in code review.
+directory:
+  - modules
+  - examples/compliant
+framework:
+  - terraform
+skip-path:
+  - examples/noncompliant
+download-external-modules: false
+compact: true
+quiet: true
