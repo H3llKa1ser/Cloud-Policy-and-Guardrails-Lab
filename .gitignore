@@ -1,0 +1,13 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+plan.json
+results.json
+compliance.json
+crash.log
+*.tfvars
+!*.example.tfvars
+# Lock files are committed for root stacks (examples/) and ignored for reusable modules.
+modules/**/.terraform.lock.hcl
+results.sarif
