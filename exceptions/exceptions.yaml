@@ -1,0 +1,19 @@
+# Policy exception register.
+#
+# An exception suppresses ONE rule for the matching resource address(es)
+# until it expires. Every entry needs all five fields, and `expires` must
+# be no more than 90 days out (aws/governance.rego enforces both; invalid
+# entries suppress nothing). Expired entries produce a warning until removed.
+#
+# `address` is a glob: `*` matches within one address segment, `**` spans
+# segments. Prefer exact addresses.
+#
+# Example:
+#
+#   - rule: NET_001
+#     address: module.bastion.aws_vpc_security_group_ingress_rule.ssh
+#     ticket: SEC-1042
+#     justification: Break-glass bastion while the VPN cutover completes
+#     expires: "2026-12-31T00:00:00Z"
+
+exceptions: []
