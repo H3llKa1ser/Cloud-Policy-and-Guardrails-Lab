@@ -1,0 +1,154 @@
+name: guardrails
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs opt in to anything more.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: 1.16.5
+  OPA_VERSION: 1.21.1
+  TFLINT_VERSION: v0.64.0
+  CHECKOV_VERSION: 3.3.24
+  CONFTEST_VERSION: 0.71.1
+  CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+  TF_IN_AUTOMATION: "true"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
+
+jobs:
+  lint:
+    name: Format, lint, validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: open-policy-agent/setup-opa@v2
+        with:
+          version: ${{ env.OPA_VERSION }}
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - run: make fmt-check
+      - run: make lint
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # avoids API rate limits on tflint --init
+      - run: make validate
+      - name: Control catalogue up to date
+        run: make controls-check
+
+  policy-tests:
+    name: Policy unit tests (OPA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: open-policy-agent/setup-opa@v2
+        with:
+          version: ${{ env.OPA_VERSION }}
+      - run: make test-policies
+
+  module-tests:
+    name: Module tests (terraform test, mocked provider)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - run: make test-modules
+
+  gate:
+    name: Plan gate (${{ matrix.stack }})
+    needs: policy-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [compliant, noncompliant]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: open-policy-agent/setup-opa@v2
+        with:
+          version: ${{ env.OPA_VERSION }}
+      - name: Install conftest (checksum-verified)
+        run: |
+          tarball="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSLO "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/${tarball}"
+          echo "${CONFTEST_SHA256}  ${tarball}" | sha256sum --check --strict
+          tar -xzf "${tarball}" conftest
+          sudo install -m 0755 conftest /usr/local/bin/conftest
+          conftest --version
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: Plan (offline, no AWS credentials)
+        run: scripts/plan.sh examples/${{ matrix.stack }}
+      - name: Enforce guardrails
+        if: matrix.stack == 'compliant'
+        run: scripts/gate.sh examples/compliant
+      - name: Assert expected violations
+        if: matrix.stack == 'noncompliant'
+        run: scripts/assert-violations.sh examples/noncompliant
+      - name: Job summary and compliance evidence
+        if: always()
+        run: |
+          stack="examples/${{ matrix.stack }}"
+          scripts/gate.sh "$stack" --output json --no-color > "$stack/results.json" || true
+          python3 scripts/controls.py report "$stack/results.json" --plan "$stack" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/controls.py report "$stack/results.json" --plan "$stack" --format json > "$stack/compliance.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: evidence-${{ matrix.stack }}
+          path: |
+            examples/${{ matrix.stack }}/plan.json
+            examples/${{ matrix.stack }}/results.json
+            examples/${{ matrix.stack }}/compliance.json
+          retention-days: 30
+
+  checkov:
+    name: Static scan (Checkov)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install "checkov==${CHECKOV_VERSION}"
+      - name: Scan
+        run: checkov --config-file .checkov.yaml --output cli --output sarif --output-file-path console,results.sarif
+      - name: Upload SARIF
+        if: always() && hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+          category: checkov
