@@ -1,0 +1,28 @@
+# Run the fast checks locally before every commit: `pre-commit install`.
+repos:
+  - repo: local
+    hooks:
+      - id: terraform-fmt
+        name: terraform fmt
+        entry: terraform fmt -check -recursive
+        language: system
+        pass_filenames: false
+        files: \.(tf|tftest\.hcl)$
+      - id: opa-fmt
+        name: opa fmt
+        entry: opa fmt --list --fail policies
+        language: system
+        pass_filenames: false
+        files: \.rego$
+      - id: opa-test
+        name: opa test
+        entry: opa test policies
+        language: system
+        pass_filenames: false
+        files: \.rego$
+      - id: controls-check
+        name: control catalogue
+        entry: make controls-check
+        language: system
+        pass_filenames: false
+        files: (\.rego|expected-violations\.txt|controls\.py)$
